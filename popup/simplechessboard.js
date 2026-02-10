@@ -2166,75 +2166,37 @@ function showReview(fen) {
   var posAfterOrig = doMove(posOrig, originalMove.from, originalMove.to, originalMove.p);
   var originalFen = generateFEN(posAfterOrig);
 
+  // Save and set engine depth for eval
+  var savedDepth = _engine.depth;
+  _engine.depth = 15;
+  _engine.kill = false;
+  _engine.ready = false;
   _engine.send("stop");
   _engine.send("ucinewgame");
 
-  // Evaluate the original game move's resulting position
-  _engine.send("position fen " + originalFen);
-  _engine.send("go depth 15", function (str) {
+  // Use engine.eval() to properly evaluate the original game move's resulting position
+  _engine.eval(originalFen, function done(str) {
+    _engine.ready = true;
 
-    if (str.indexOf("bestmove") < 0) return; // Wait for bestmove
-
-    // _engine.score is from the side-to-move's perspective after the original move
-    // Negate to get the score from the mover's perspective
+    // engine.score is from the side-to-move's perspective after the original move
+    // Negate to get the score from the mover's perspective (the player who made the move)
     var originalScore = -(_engine.score || 0);
 
+    // Restore depth
+    _engine.depth = savedDepth;
+
     // Now run MultiPV on the original position to find alternates
+    // Use MultiPV 5 to get more candidates for filtering
     var lastDepth = 0;
+    var candidates = {}; // Keyed by multipv number, stores latest depth data
 
     _engine.send("stop");
     _engine.send("ucinewgame");
     _engine.send("position fen " + fen);
-    _engine.send("setoption name MultiPV value 3");
+    _engine.send("setoption name MultiPV value 5");
     _engine.send("go depth 15", function (str2) {
 
-      if (str2.indexOf("bestmove") >= 0) {
-        _processingGuess = false; // Allow click to continue
-
-        // Check if any alternates were shown
-        var hasAlternates = false;
-        var elem = document.getElementById('chessboard1');
-        for (var i = 0; i < elem.children.length; i++) {
-          if (elem.children[i].dataset && elem.children[i].dataset.reviewText) {
-            hasAlternates = true;
-            break;
-          }
-        }
-
-        // Helper to reset/clear arrow1
-        var clearArrow1 = function () {
-          var arrow1 = document.getElementById("arrowWrapper1");
-          if (arrow1) {
-            var line = arrow1.children[0].children[1];
-            line.setAttribute('x1', 0); line.setAttribute('y1', 0);
-            line.setAttribute('x2', 0); line.setAttribute('y2', 0);
-            line.style.stroke = "#000000";
-            var marker = document.getElementById("markerArrow1");
-            if (marker) marker.children[0].style.fill = "#000000";
-          }
-        };
-
-        if (!hasAlternates) {
-          showStatus("Only Best Move found. Click board to continue.");
-
-          // Draw Purple Arrow for Best Move
-          var arrow1 = document.getElementById("arrowWrapper1");
-          if (arrow1 && originalMove) {
-            var line = arrow1.children[0].children[1];
-            line.style.stroke = "#800080"; // Purple
-            var marker = document.getElementById("markerArrow1");
-            if (marker) marker.children[0].style.fill = "#800080";
-
-            showArrow1(originalMove);
-          }
-
-        } else {
-          showStatus("Reviewing alternates... Click board to continue.");
-          // Ensure arrow is cleared if we have alternates
-          clearArrow1();
-        }
-      }
-
+      // Collect candidate moves as they come in
       var match = str2.match(/multipv (\d+) .*score (cp|mate) ([-\d]+) .*nodes \d+ .*depth (\d+) .*pv (\w+)/);
       if (match) {
         var multipv = Number(match[1]);
@@ -2245,72 +2207,132 @@ function showReview(fen) {
 
         if (depth < 5) return; // Skip very shallow searches
 
-        // New depth? Clear previous highlights
+        // Track latest depth
         if (depth > lastDepth) {
           lastDepth = depth;
-          // Clear highlights and arrows
+          candidates = {}; // Clear candidates for new depth
+        }
+        if (depth < lastDepth) return;
+
+        // Store candidate
+        var to = { x: "abcdefgh".indexOf(moveStr[2]), y: "87654321".indexOf(moveStr[3]) };
+        var from = { x: "abcdefgh".indexOf(moveStr[0]), y: "87654321".indexOf(moveStr[1]) };
+        candidates[multipv] = {
+          multipv: multipv,
+          type: type,
+          score: score,
+          depth: depth,
+          moveStr: moveStr,
+          from: from,
+          to: to
+        };
+      }
+
+      // When engine finishes, filter and render
+      if (str2.indexOf("bestmove") >= 0) {
+
+        // Convert candidates to array and filter to only moves BETTER than the original game move
+        var candidateList = [];
+        for (var key in candidates) {
+          var c = candidates[key];
+          // Check if this candidate is the same as the original game move
+          var isOriginal = c.from.x == originalMove.from.x && c.from.y == originalMove.from.y &&
+            c.to.x == originalMove.to.x && c.to.y == originalMove.to.y;
+          if (isOriginal) continue; // Skip the original move from alternates
+
+          // Only keep moves better than the original game move
+          if (c.type == "mate" || c.score > originalScore) {
+            candidateList.push(c);
+          }
+        }
+
+        // Sort by score descending (best first) - mate scores sort highest
+        candidateList.sort(function (a, b) {
+          if (a.type == "mate" && b.type != "mate") return -1;
+          if (b.type == "mate" && a.type != "mate") return 1;
+          return b.score - a.score;
+        });
+
+        // Take top 3 at most
+        if (candidateList.length > 3) candidateList = candidateList.slice(0, 3);
+
+        // Helper to render eval text on a square
+        var renderMoveOnBoard = function (moveData, color) {
+          var evalText = (moveData.type == "mate" ? "M" : "") + (moveData.score / 100).toFixed(1);
+          if (moveData.type != "mate" && moveData.score > 0) evalText = "+" + evalText;
+
+          var x = moveData.to.x;
+          var y = moveData.to.y;
+          if (_flip) { x = 7 - x; y = 7 - y; }
+
           var elem = document.getElementById('chessboard1');
           for (var i = 0; i < elem.children.length; i++) {
             var div = elem.children[i];
-            if (div.className.indexOf(" h1") >= 0) {
-              div.className = div.className.replace(" h1", "");
-              setElemText(div, "");
-            }
-            // Also clear text if it was set without h1 (our new method)
-            if (div.dataset.reviewText) {
-              setElemText(div, "");
-              delete div.dataset.reviewText;
+            var dx = parseInt(div.style.left.replace("px", "")) / 40;
+            var dy = parseInt(div.style.top.replace("px", "")) / 40;
+            if (dx == x && dy == y) {
+              if (getElemText(div) != "") return; // Deduplicate
+              setElemText(div, evalText);
+              div.dataset.reviewText = "true";
+              div.style.fontSize = "12px";
+              div.style.lineHeight = "40px";
+              div.style.color = color;
+              div.style.fontWeight = "bold";
+              div.style.zIndex = "10";
             }
           }
-          // Clear Alternate Arrows (Wrapper 3 and 4)
-          document.getElementById("arrowWrapper3").style.display = "none";
-          document.getElementById("arrowWrapper4").style.display = "none";
-        }
+        };
 
-        if (depth < lastDepth) return;
-
-        // Filter moves that are more than 200cp worse than the ORIGINAL game move
-        // Score here is from side-to-move's perspective (the player making the move)
-        if (type == "cp" && score < (originalScore - 200)) return;
-
-        var evalText = (type == "mate" ? "M" : "") + (score / 100).toFixed(1);
-        if (type != "mate" && score > 0) evalText = "+" + evalText;
-
-        var to = { x: "abcdefgh".indexOf(moveStr[2]), y: "87654321".indexOf(moveStr[3]) };
-        var from = { x: "abcdefgh".indexOf(moveStr[0]), y: "87654321".indexOf(moveStr[1]) };
-        var x = to.x;
-        var y = to.y;
-
-        if (_flip) { x = 7 - x; y = 7 - y; }
-
+        // Clear any previous highlights
         var elem = document.getElementById('chessboard1');
         for (var i = 0; i < elem.children.length; i++) {
           var div = elem.children[i];
-          var dx = parseInt(div.style.left.replace("px", "")) / 40;
-          var dy = parseInt(div.style.top.replace("px", "")) / 40;
-          if (dx == x && dy == y) {
-            // Deduplicate: If square already has text (from better multipv), skip
-            if (getElemText(div) != "") return;
-
-            setElemText(div, evalText);
-            div.dataset.reviewText = "true"; // Mark for clearing
-
-            div.style.fontSize = "12px";
-            div.style.lineHeight = "40px";
-            div.style.color = "blue";
-            div.style.fontWeight = "bold";
-            // Ensure text is visible on top of any background
-            div.style.zIndex = "10";
-
-            // Draw Arrow for Alternate
-            // multipv 1 is best move (engine top choice).
-            // If this move is NOT the best move (multipv > 1), draw arrow using 3 or 4.
-            if (multipv > 1) {
-              var move = { from: from, to: to };
-              if (multipv == 2) showArrow3(move);
-              else if (multipv == 3) showArrow4(move);
-            }
+          if (div.className.indexOf(" h1") >= 0) {
+            div.className = div.className.replace(" h1", "");
+            setElemText(div, "");
           }
+          if (div.dataset && div.dataset.reviewText) {
+            setElemText(div, "");
+            delete div.dataset.reviewText;
+          }
+        }
+        document.getElementById("arrowWrapper3").style.display = "none";
+        document.getElementById("arrowWrapper4").style.display = "none";
+
+        // Always show the original game move with purple arrow
+        var origEvalData = {
+          type: "cp",
+          score: originalScore,
+          to: { x: originalMove.to.x, y: originalMove.to.y },
+          from: { x: originalMove.from.x, y: originalMove.from.y }
+        };
+        renderMoveOnBoard(origEvalData, "#800080"); // Purple for original
+
+        // Draw purple arrow for original game move
+        var arrow1 = document.getElementById("arrowWrapper1");
+        if (arrow1) {
+          var line = arrow1.children[0].children[1];
+          line.style.stroke = "#800080";
+          var marker = document.getElementById("markerArrow1");
+          if (marker) marker.children[0].style.fill = "#800080";
+          showArrow1(originalMove);
+        }
+
+        // Render better alternate moves (up to 3)
+        for (var i = 0; i < candidateList.length; i++) {
+          renderMoveOnBoard(candidateList[i], "blue");
+          var move = { from: candidateList[i].from, to: candidateList[i].to };
+          if (i == 0) showArrow3(move);
+          else if (i == 1) showArrow4(move);
+          // 3rd move gets eval text but no arrow (only 2 alternate arrow slots)
+        }
+
+        _processingGuess = false; // Allow click to continue
+
+        if (candidateList.length == 0) {
+          showStatus("Best move played! Click board to continue.");
+        } else {
+          showStatus(candidateList.length + " better move" + (candidateList.length > 1 ? "s" : "") + " found. Click board to continue.");
         }
       }
     });
