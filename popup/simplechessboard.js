@@ -2188,9 +2188,9 @@ function showReview(fen) {
         var arrow1 = document.getElementById("arrowWrapper1");
         if (arrow1 && bestMove) {
           var line = arrow1.children[0].children[1];
-          line.style.stroke = "#00cc00"; // Green
+          line.style.stroke = "#0033ff"; // Blue
           var marker = document.getElementById("markerArrow1");
-          if (marker) marker.children[0].style.fill = "#00cc00";
+          if (marker) marker.children[0].style.fill = "#0033ff";
 
           showArrow1(bestMove);
         }
