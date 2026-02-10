@@ -110,8 +110,8 @@ function command(text, skipOpening) {
     }
     refreshFlip();
 
-    // Auto-play first 2 plies (1 full move) if available, UNLESS explicitly disabled (default game)
-    var skipCount = (skipOpening === false) ? 0 : 2;
+    // Auto-play opening plies: 3 for black (so it's black's turn), 2 for white
+    var skipCount = (skipOpening === false) ? 0 : (headers["Result"] == "0-1" ? 3 : 2);
     for (var k = 0; k < skipCount && k < _targetGame.length; k++) {
       var tMove = _targetGame[k];
       var pos = parseFEN(getCurFEN());
