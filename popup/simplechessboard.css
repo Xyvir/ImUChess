@@ -476,6 +476,16 @@ li {
     height: 157px;
 }
 
+#scoreDisplay {
+    background-color: #222;
+    color: #fff;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 5px;
+    text-align: center;
+    border-bottom: 1px solid #444;
+}
+
 /* Status bar */
 
 #status {

@@ -74,6 +74,8 @@ function command(text, skipOpening) {
     _targetGame = [];
     _guessMode = true; // Always true now
     _targetMoveIndex = 0;
+    _cumulativeScore = 0; // Reset score
+    updateScoreDisplay();
 
     var pos = parseFEN(START);
     var oldhistory = JSON.parse(JSON.stringify(_history));
@@ -2094,9 +2096,13 @@ function checkGuess(userMove, oldfen) {
 
         var diff = myUserScore - myTargetScore;
 
-        if (diff >= -50) {
+        if (diff >= -200) {
           var msg = "Good alternative! (" + (diff > 0 ? "+" : "") + diff + " cp).";
           showStatus(msg);
+
+          // Update Score
+          _cumulativeScore += diff;
+          updateScoreDisplay();
 
           // Trigger Review Mode
           // Undo user move first to show alternates from the starting position
@@ -2188,9 +2194,9 @@ function showReview(fen) {
         var arrow1 = document.getElementById("arrowWrapper1");
         if (arrow1 && bestMove) {
           var line = arrow1.children[0].children[1];
-          line.style.stroke = "#0033ff"; // Blue
+          line.style.stroke = "#800080"; // Purple
           var marker = document.getElementById("markerArrow1");
-          if (marker) marker.children[0].style.fill = "#0033ff";
+          if (marker) marker.children[0].style.fill = "#800080";
 
           showArrow1(bestMove);
         }
@@ -2237,8 +2243,8 @@ function showReview(fen) {
       if (depth < lastDepth) return;
 
       // Filter blunders (simple check: if score is very bad relative to 0? Or just absolute bad?)
-      // Let's hide moves with score < -100 cp for now
-      if (type == "cp" && score < -100) return;
+      // Let's hide moves with score < -200 cp for now
+      if (type == "cp" && score < -200) return;
 
       var evalText = (type == "mate" ? "M" : "") + (score / 100).toFixed(1);
       if (type != "mate" && score > 0) evalText = "+" + evalText;
