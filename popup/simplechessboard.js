@@ -8,6 +8,7 @@ var _targetGame = [], _guessMode = true, _targetMoveIndex = 0;
 var _pgnHeaders = {};
 var _processingGuess = false;
 var _cumulativeScore = 0;
+var _lastScrolledMoveIndex = -1;
 
 function setElemText(elem, value) {
   while (elem.firstChild) elem.removeChild(elem.firstChild);
@@ -76,6 +77,7 @@ function command(text, skipOpening) {
     _guessMode = true; // Always true now
     _targetMoveIndex = 0;
     _cumulativeScore = 0; // Reset score
+    _lastScrolledMoveIndex = -1; // Reset scroll tracker
     updateScoreDisplay();
 
     var pos = parseFEN(START);
@@ -2013,10 +2015,10 @@ function showGuessHistory() {
 
     table.appendChild(row);
 
-    // Scroll to active
-    if (i == _targetMoveIndex || i + 1 == _targetMoveIndex) {
-      // crude scroll
-      setTimeout(function () { row.scrollIntoView({ block: "center" }); }, 0);
+    // Scroll to active only when the move index changed
+    if ((i == _targetMoveIndex || i + 1 == _targetMoveIndex) && _targetMoveIndex != _lastScrolledMoveIndex) {
+      _lastScrolledMoveIndex = _targetMoveIndex;
+      (function (r) { setTimeout(function () { r.scrollIntoView({ block: "center" }); }, 0); })(row);
     }
   }
   div.appendChild(table);
