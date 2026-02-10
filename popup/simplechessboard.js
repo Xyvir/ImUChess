@@ -2160,144 +2160,160 @@ function showReview(fen) {
   setCurFEN(fen);
   showBoard();
 
-  var lastDepth = 0;
+  // First, evaluate the original game move to get a baseline score
+  var originalMove = _targetGame[_targetMoveIndex];
+  var posOrig = parseFEN(fen);
+  var posAfterOrig = doMove(posOrig, originalMove.from, originalMove.to, originalMove.p);
+  var originalFen = generateFEN(posAfterOrig);
 
   _engine.send("stop");
   _engine.send("ucinewgame");
-  _engine.send("position fen " + fen);
-  _engine.send("setoption name MultiPV value 3");
+
+  // Evaluate the original game move's resulting position
+  _engine.send("position fen " + originalFen);
   _engine.send("go depth 15", function (str) {
 
-    if (str.indexOf("bestmove") >= 0) {
-      _processingGuess = false; // Allow click to continue
+    if (str.indexOf("bestmove") < 0) return; // Wait for bestmove
 
-      // Check if any alternates were shown
-      var hasAlternates = false;
-      var elem = document.getElementById('chessboard1');
-      for (var i = 0; i < elem.children.length; i++) {
-        if (elem.children[i].className.indexOf(" h1") >= 0) {
-          hasAlternates = true;
-          break;
+    // _engine.score is from the side-to-move's perspective after the original move
+    // Negate to get the score from the mover's perspective
+    var originalScore = -(_engine.score || 0);
+
+    // Now run MultiPV on the original position to find alternates
+    var lastDepth = 0;
+
+    _engine.send("stop");
+    _engine.send("ucinewgame");
+    _engine.send("position fen " + fen);
+    _engine.send("setoption name MultiPV value 3");
+    _engine.send("go depth 15", function (str2) {
+
+      if (str2.indexOf("bestmove") >= 0) {
+        _processingGuess = false; // Allow click to continue
+
+        // Check if any alternates were shown
+        var hasAlternates = false;
+        var elem = document.getElementById('chessboard1');
+        for (var i = 0; i < elem.children.length; i++) {
+          if (elem.children[i].dataset && elem.children[i].dataset.reviewText) {
+            hasAlternates = true;
+            break;
+          }
+        }
+
+        // Helper to reset/clear arrow1
+        var clearArrow1 = function () {
+          var arrow1 = document.getElementById("arrowWrapper1");
+          if (arrow1) {
+            var line = arrow1.children[0].children[1];
+            line.setAttribute('x1', 0); line.setAttribute('y1', 0);
+            line.setAttribute('x2', 0); line.setAttribute('y2', 0);
+            line.style.stroke = "#000000";
+            var marker = document.getElementById("markerArrow1");
+            if (marker) marker.children[0].style.fill = "#000000";
+          }
+        };
+
+        if (!hasAlternates) {
+          showStatus("Only Best Move found. Click board to continue.");
+
+          // Draw Purple Arrow for Best Move
+          var arrow1 = document.getElementById("arrowWrapper1");
+          if (arrow1 && originalMove) {
+            var line = arrow1.children[0].children[1];
+            line.style.stroke = "#800080"; // Purple
+            var marker = document.getElementById("markerArrow1");
+            if (marker) marker.children[0].style.fill = "#800080";
+
+            showArrow1(originalMove);
+          }
+
+        } else {
+          showStatus("Reviewing alternates... Click board to continue.");
+          // Ensure arrow is cleared if we have alternates
+          clearArrow1();
         }
       }
 
+      var match = str2.match(/multipv (\d+) .*score (cp|mate) ([-\d]+) .*nodes \d+ .*depth (\d+) .*pv (\w+)/);
+      if (match) {
+        var multipv = Number(match[1]);
+        var type = match[2];
+        var score = Number(match[3]);
+        var depth = Number(match[4]);
+        var moveStr = match[5];
 
-      // Helper to reset/clear arrow1
-      var clearArrow1 = function () {
-        var arrow1 = document.getElementById("arrowWrapper1");
-        if (arrow1) {
-          var line = arrow1.children[0].children[1];
-          line.setAttribute('x1', 0); line.setAttribute('y1', 0);
-          line.setAttribute('x2', 0); line.setAttribute('y2', 0);
-          line.style.stroke = "#000000";
-          var marker = document.getElementById("markerArrow1");
-          if (marker) marker.children[0].style.fill = "#000000";
+        if (depth < 5) return; // Skip very shallow searches
+
+        // New depth? Clear previous highlights
+        if (depth > lastDepth) {
+          lastDepth = depth;
+          // Clear highlights and arrows
+          var elem = document.getElementById('chessboard1');
+          for (var i = 0; i < elem.children.length; i++) {
+            var div = elem.children[i];
+            if (div.className.indexOf(" h1") >= 0) {
+              div.className = div.className.replace(" h1", "");
+              setElemText(div, "");
+            }
+            // Also clear text if it was set without h1 (our new method)
+            if (div.dataset.reviewText) {
+              setElemText(div, "");
+              delete div.dataset.reviewText;
+            }
+          }
+          // Clear Alternate Arrows (Wrapper 3 and 4)
+          document.getElementById("arrowWrapper3").style.display = "none";
+          document.getElementById("arrowWrapper4").style.display = "none";
         }
-      };
 
-      if (!hasAlternates) {
-        showStatus("Only Best Move found. Click board to continue.");
+        if (depth < lastDepth) return;
 
-        // Draw Green Arrow for Best Move
-        var bestMove = _targetGame[_targetMoveIndex];
+        // Filter moves that are more than 200cp worse than the ORIGINAL game move
+        // Score here is from side-to-move's perspective (the player making the move)
+        if (type == "cp" && score < (originalScore - 200)) return;
 
-        var arrow1 = document.getElementById("arrowWrapper1");
-        if (arrow1 && bestMove) {
-          var line = arrow1.children[0].children[1];
-          line.style.stroke = "#800080"; // Purple
-          var marker = document.getElementById("markerArrow1");
-          if (marker) marker.children[0].style.fill = "#800080";
+        var evalText = (type == "mate" ? "M" : "") + (score / 100).toFixed(1);
+        if (type != "mate" && score > 0) evalText = "+" + evalText;
 
-          showArrow1(bestMove);
-        }
+        var to = { x: "abcdefgh".indexOf(moveStr[2]), y: "87654321".indexOf(moveStr[3]) };
+        var from = { x: "abcdefgh".indexOf(moveStr[0]), y: "87654321".indexOf(moveStr[1]) };
+        var x = to.x;
+        var y = to.y;
 
-      } else {
-        showStatus("Reviewing alternates... Click board to continue.");
-        // Ensure arrow is cleared if we have alternates
-        clearArrow1();
-      }
-    }
+        if (_flip) { x = 7 - x; y = 7 - y; }
 
-    var match = str.match(/multipv (\d+) .*score (cp|mate) ([-\d]+) .*nodes \d+ .*depth (\d+) .*pv (\w+)/);
-    if (match) {
-      var multipv = Number(match[1]);
-      var type = match[2];
-      var score = Number(match[3]);
-      var depth = Number(match[4]);
-      var moveStr = match[5];
-
-      if (depth < 5) return; // Skip very shallow searches
-
-      // New depth? Clear previous highlights
-      if (depth > lastDepth) {
-        lastDepth = depth;
-        // Clear highlights and arrows
         var elem = document.getElementById('chessboard1');
         for (var i = 0; i < elem.children.length; i++) {
           var div = elem.children[i];
-          if (div.className.indexOf(" h1") >= 0) {
-            div.className = div.className.replace(" h1", "");
-            setElemText(div, "");
-          }
-          // Also clear text if it was set without h1 (our new method)
-          if (div.dataset.reviewText) {
-            setElemText(div, "");
-            delete div.dataset.reviewText;
-          }
-        }
-        // Clear Alternate Arrows (Wrapper 3 and 4)
-        document.getElementById("arrowWrapper3").style.display = "none";
-        document.getElementById("arrowWrapper4").style.display = "none";
-      }
+          var dx = parseInt(div.style.left.replace("px", "")) / 40;
+          var dy = parseInt(div.style.top.replace("px", "")) / 40;
+          if (dx == x && dy == y) {
+            // Deduplicate: If square already has text (from better multipv), skip
+            if (getElemText(div) != "") return;
 
-      if (depth < lastDepth) return;
+            setElemText(div, evalText);
+            div.dataset.reviewText = "true"; // Mark for clearing
 
-      // Filter blunders (simple check: if score is very bad relative to 0? Or just absolute bad?)
-      // Let's hide moves with score < -200 cp for now
-      if (type == "cp" && score < -200) return;
+            div.style.fontSize = "12px";
+            div.style.lineHeight = "40px";
+            div.style.color = "blue";
+            div.style.fontWeight = "bold";
+            // Ensure text is visible on top of any background
+            div.style.zIndex = "10";
 
-      var evalText = (type == "mate" ? "M" : "") + (score / 100).toFixed(1);
-      if (type != "mate" && score > 0) evalText = "+" + evalText;
-
-      var to = { x: "abcdefgh".indexOf(moveStr[2]), y: "87654321".indexOf(moveStr[3]) };
-      var from = { x: "abcdefgh".indexOf(moveStr[0]), y: "87654321".indexOf(moveStr[1]) };
-      var x = to.x;
-      var y = to.y;
-
-      if (_flip) { x = 7 - x; y = 7 - y; }
-
-      var elem = document.getElementById('chessboard1');
-      for (var i = 0; i < elem.children.length; i++) {
-        var div = elem.children[i];
-        var dx = parseInt(div.style.left.replace("px", "")) / 40;
-        var dy = parseInt(div.style.top.replace("px", "")) / 40;
-        if (dx == x && dy == y) {
-          // Deduplicate: If square already has text (from better multipv), skip
-          if (getElemText(div) != "") return;
-
-          setElemText(div, evalText);
-          // div.className += " h1"; // Removed highlight class as requested
-          div.dataset.reviewText = "true"; // Mark for clearing
-
-          div.style.fontSize = "12px";
-          div.style.lineHeight = "40px";
-          div.style.color = "blue";
-          div.style.fontWeight = "bold";
-          // Ensure text is visible on top of any background
-          div.style.zIndex = "10";
-
-          // Draw Arrow for Alternate
-          // multipv 1 is best move (user played it, or we handle it otherwise).
-          // But here we are iterating PVs.
-          // If this move is NOT the best move (multipv > 1), draw arrow using 3 or 4.
-          if (multipv > 1) {
-            var move = { from: from, to: to };
-            if (multipv == 2) showArrow3(move);
-            else if (multipv == 3) showArrow4(move);
+            // Draw Arrow for Alternate
+            // multipv 1 is best move (engine top choice).
+            // If this move is NOT the best move (multipv > 1), draw arrow using 3 or 4.
+            if (multipv > 1) {
+              var move = { from: from, to: to };
+              if (multipv == 2) showArrow3(move);
+              else if (multipv == 3) showArrow4(move);
+            }
           }
         }
       }
-    }
+    });
   });
 }
 
