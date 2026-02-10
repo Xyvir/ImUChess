@@ -21,8 +21,8 @@ li {
 
 #container {
     position: relative;
-    width: 600px;
-    height: 424px;
+    width: 100%;
+    height: 100%;
     background-color: #737f88;
 }
 
@@ -438,52 +438,60 @@ li {
 
 /* Status bar */
 
+/* Move list */
+
+#historyWrapper {
+    position: absolute;
+    width: 206px;
+    height: 328px;
+    top: 82px;
+    left: 380px;
+    background-color: #000000;
+    border-width: 2px;
+    border-style: solid;
+    border-color: rgba(255, 255, 255, 0.2) black black rgba(255, 255, 255, 0.2);
+    display: flex;
+    flex-direction: column;
+}
+
+#moves {
+    line-height: 22px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+    overflow-y: scroll;
+    flex: 1;
+    /* Take remaining space */
+}
+
+#container.edit #historyWrapper {
+    height: 258px;
+}
+
+#container.graph #historyWrapper {
+    height: 240px;
+}
+
+#container.info #historyWrapper {
+    height: 157px;
+}
+
+/* Status bar */
+
 #status {
     background-color: #f9f9fa;
     color: #444444;
     height: 21px;
     border-style: solid;
     border-color: #e3e3e3;
-    border-width: 1px 0 0 1px;
+    border-width: 1px 0 0 0;
     font-size: 12px;
     line-height: 20px;
-    display: inline-block;
     padding: 0 4px 0 4px;
     pointer-events: none;
-    position: absolute;
-    right: 0;
-    bottom: 0;
-}
-
-/* Move list */
-
-#moves {
-    line-height: 22px;
-    font-size: 14px;
-    font-weight: 600;
-    position: absolute;
-    width: 206px;
-    height: 328px;
-    top: 82px;
-    left: 380px;
-    color: #ffffff;
-    background-color: #000000;
-    border-width: 2px;
-    border-style: solid;
-    border-color: rgba(255, 255, 255, 0.2) black black rgba(255, 255, 255, 0.2);
-    overflow-y: scroll;
-}
-
-#container.edit #moves {
-    height: 258px;
-}
-
-#container.graph #moves {
-    height: 240px;
-}
-
-#container.info #moves {
-    height: 157px;
+    /* Static positioning in flex container */
+    display: block !important;
+    /* Ensure visibility if JS toggles it? JS toggles display:none, so we rely on that. */
 }
 
 .line:nth-child(even) {
