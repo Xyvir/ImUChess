@@ -2297,38 +2297,61 @@ function showReview(fen) {
             delete div.dataset.reviewText;
           }
         }
+        document.getElementById("arrowWrapper2").style.display = "none";
         document.getElementById("arrowWrapper3").style.display = "none";
         document.getElementById("arrowWrapper4").style.display = "none";
 
-        // Always show the original game move with purple arrow
+        // Always show the original game move with yellow arrow
         var origEvalData = {
           type: "cp",
           score: originalScore,
           to: { x: originalMove.to.x, y: originalMove.to.y },
           from: { x: originalMove.from.x, y: originalMove.from.y }
         };
-        renderMoveOnBoard(origEvalData, "#800080"); // Purple for original
+        renderMoveOnBoard(origEvalData, "#DAA520"); // Yellow/gold for original game move
 
-        // Draw purple arrow for original game move
+        // Draw yellow arrow for original game move (thick + fully opaque)
         var arrow1 = document.getElementById("arrowWrapper1");
         if (arrow1) {
           var line = arrow1.children[0].children[1];
-          line.style.stroke = "#800080";
+          line.style.stroke = "#DAA520";
+          line.style.strokeWidth = "8";
+          line.style.strokeOpacity = "1";
           var marker = document.getElementById("markerArrow1");
-          if (marker) marker.children[0].style.fill = "#800080";
+          if (marker) marker.children[0].style.fill = "#DAA520";
           showArrow1(originalMove);
         }
 
-        // Render better alternate moves (up to 3)
+        // Helper to set arrow color + style on a wrapper
+        var setArrowStyle = function (wrapperId, markerId, color) {
+          var wrapper = document.getElementById(wrapperId);
+          if (wrapper) {
+            var arrowLine = wrapper.children[0].children[1];
+            arrowLine.style.stroke = color;
+            arrowLine.style.strokeWidth = "8";
+            arrowLine.style.strokeOpacity = "1";
+            var arrowMarker = document.getElementById(markerId);
+            if (arrowMarker) arrowMarker.children[0].style.fill = color;
+          }
+        };
+
+        // Render better alternate moves (up to 3) with blue arrows
+        var altArrows = [
+          { show: showArrow3, wrapper: "arrowWrapper3", marker: "markerArrow3" },
+          { show: showArrow4, wrapper: "arrowWrapper4", marker: "markerArrow4" },
+          { show: showArrow2, wrapper: "arrowWrapper2", marker: "markerArrow2" }
+        ];
         for (var i = 0; i < candidateList.length; i++) {
-          renderMoveOnBoard(candidateList[i], "blue");
+          renderMoveOnBoard(candidateList[i], "#0055ff");
           var move = { from: candidateList[i].from, to: candidateList[i].to };
-          if (i == 0) showArrow3(move);
-          else if (i == 1) showArrow4(move);
-          // 3rd move gets eval text but no arrow (only 2 alternate arrow slots)
+          if (i < altArrows.length) {
+            setArrowStyle(altArrows[i].wrapper, altArrows[i].marker, "#0055ff");
+            altArrows[i].show(move);
+          }
         }
 
         _processingGuess = false; // Allow click to continue
+        _engine.lastnodes = 0; // Reset engine state so next engine.eval() works correctly
 
         if (candidateList.length == 0) {
           showStatus("Best move played! Click board to continue.");
@@ -2342,7 +2365,10 @@ function showReview(fen) {
 
 function endReview() {
   _reviewMode = false;
+  _engine.send("stop");
+  _engine.send("ucinewgame");
   _engine.send("setoption name MultiPV value 1");
+  _engine.lastnodes = 0; // Reset so engine.eval() fen tracking works
 
   // Clear arrow1 (Best Move indication)
   var clearArrow = function (id) {
@@ -2354,16 +2380,29 @@ function endReview() {
       // so display none is fine.
 
       // Also reset color if we changed it (arrow1)
+      // Reset colors, stroke-width, and opacity on all arrows
+      var line = wrapper.children[0].children[1];
+      line.style.strokeWidth = "6";
+      line.style.strokeOpacity = "";
       if (id == "arrowWrapper1") {
-        var line = wrapper.children[0].children[1];
         line.style.stroke = "#000000";
         var marker = document.getElementById("markerArrow1");
         if (marker) marker.children[0].style.fill = "#000000";
+      } else if (id == "arrowWrapper3" || id == "arrowWrapper4") {
+        line.style.stroke = "#0033ff";
+        var markerId = id.replace("arrowWrapper", "markerArrow");
+        var marker = document.getElementById(markerId);
+        if (marker) marker.children[0].style.fill = "#0033ff";
+      } else if (id == "arrowWrapper2") {
+        line.style.stroke = "";
+        var marker = document.getElementById("markerArrow2");
+        if (marker) marker.children[0].style.fill = "";
       }
     }
   };
 
   clearArrow("arrowWrapper1");
+  clearArrow("arrowWrapper2");
   clearArrow("arrowWrapper3");
   clearArrow("arrowWrapper4");
 
