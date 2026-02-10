@@ -2197,12 +2197,13 @@ function showReview(fen) {
     _engine.send("go depth 15", function (str2) {
 
       // Collect candidate moves as they come in
-      var match = str2.match(/multipv (\d+) .*score (cp|mate) ([-\d]+) .*nodes \d+ .*depth (\d+) .*pv (\w+)/);
+      // UCI info format: "info depth X seldepth Y multipv N score cp|mate Z nodes W ... pv MOVE ..."
+      var match = str2.match(/depth (\d+) .*multipv (\d+) .*score (cp|mate) ([-\d]+).*pv (\w+)/);
       if (match) {
-        var multipv = Number(match[1]);
-        var type = match[2];
-        var score = Number(match[3]);
-        var depth = Number(match[4]);
+        var depth = Number(match[1]);
+        var multipv = Number(match[2]);
+        var type = match[3];
+        var score = Number(match[4]);
         var moveStr = match[5];
 
         if (depth < 5) return; // Skip very shallow searches
