@@ -7,6 +7,7 @@ var _dragElement = null, _dragActive = false, _startX, _startY, _dragCtrl, _clic
 var _targetGame = [], _guessMode = true, _targetMoveIndex = 0;
 var _pgnHeaders = {};
 var _processingGuess = false;
+var _cumulativeScore = 0;
 
 function setElemText(elem, value) {
   while (elem.firstChild) elem.removeChild(elem.firstChild);
@@ -262,6 +263,13 @@ function showStatus(text, answer) {
     };
     showArrow1(move);
   } else setArrow(_arrow);
+}
+
+function updateScoreDisplay() {
+  var elem = document.getElementById('scoreDisplay');
+  if (elem) {
+    setElemText(elem, 'Score: ' + (_cumulativeScore / 100).toFixed(2));
+  }
 }
 
 // Chessboard and arrows
