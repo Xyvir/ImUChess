@@ -4,8 +4,9 @@ var _history = [[START]], _history2 = null, _historyindex = 0;
 var _flip = false, _edit = false, _info = false, _graph = false, _play = null;
 var _arrow = false, _menu = false;
 var _dragElement = null, _dragActive = false, _startX, _startY, _dragCtrl, _clickFrom, _clickFromElem;
-var _targetGame = null, _guessMode = false, _targetMoveIndex = 0;
+var _targetGame = [], _guessMode = true, _targetMoveIndex = 0;
 var _pgnHeaders = {};
+var _processingGuess = false;
 
 function setElemText(elem, value) {
   while (elem.firstChild) elem.removeChild(elem.firstChild);
@@ -26,7 +27,7 @@ function getCurFEN() {
 
 // Input box and commands
 
-function command(text) {
+function command(text, skipOpening) {
   var mvdivs = ['<div class="moves">', '<div class="tview2 column">', '<div class="extension-item Moves">'];
   for (var i = 0; i < mvdivs.length; i++) {
     if (text.indexOf(mvdivs[i]) >= 0) {
@@ -71,7 +72,7 @@ function command(text) {
 
     // Prepare for Guess Mode
     _targetGame = [];
-    _guessMode = true;
+    _guessMode = true; // Always true now
     _targetMoveIndex = 0;
 
     var pos = parseFEN(START);
@@ -106,7 +107,17 @@ function command(text) {
     }
     refreshFlip();
 
-    showStatus("Guess Mode Started! Play " + (headers["Result"] == "0-1" ? "Black" : "White") + "'s moves.");
+    // Auto-play first 2 plies (1 full move) if available, UNLESS explicitly disabled (default game)
+    var skipCount = (skipOpening === false) ? 0 : 2;
+    for (var k = 0; k < skipCount && k < _targetGame.length; k++) {
+      var tMove = _targetGame[k];
+      var pos = parseFEN(getCurFEN());
+      var pos2 = doMove(pos, tMove.from, tMove.to, tMove.p);
+      historyAdd(getCurFEN());
+      setCurFEN(generateFEN(pos2));
+      historyAdd(getCurFEN(), null, tMove, tMove.san);
+      _targetMoveIndex++;
+    } showStatus("Guess Mode Started! Play " + (headers["Result"] == "0-1" ? "Black" : "White") + "'s moves.");
     showBoard();
   } else if (text.toLowerCase() == "reset") {
     setCurFEN(START);
@@ -420,6 +431,8 @@ function showArrowInternal(move, wrapperId) {
 }
 function showArrow1(move) { showArrowInternal(move, "arrowWrapper1"); }
 function showArrow2(move) { showArrowInternal(move, "arrowWrapper2"); }
+function showArrow3(move) { showArrowInternal(move, "arrowWrapper3"); }
+function showArrow4(move) { showArrowInternal(move, "arrowWrapper4"); }
 function updateInfo() {
   var addline = function (e, label, value, color, right, className, underline) {
     var line = document.createElement('div');
@@ -566,6 +579,7 @@ function updateInfo() {
   addline(elem, "Difference", text6, c);
 }
 function showEvals() {
+  if (_guessMode) return;
   setElemText(document.getElementById("moves"), "");
   if (_curmoves.length > 0) {
     var sortfunc = function (a, b) {
@@ -997,15 +1011,18 @@ function refreshMoves() {
       ul.appendChild(li);
       document.getElementById("moves").appendChild(ul);
     } else {
-      showEvals();
+      if (_guessMode) showGuessHistory(); else showEvals();
     }
   } else {
     var div = document.createElement('div');
     div.style.color = "red";
-    setElemText(div, "Illegal position:");
+    setElemText(div, "No game loaded or illegal position");
     document.getElementById("moves").appendChild(div);
 
     var ul = document.createElement('ul');
+    var li = document.createElement('li');
+    setElemText(li, "Paste PGN in top box to play through game");
+    ul.appendChild(li);
     for (var i = 0; i < errmsgs.length; i++) {
       var li = document.createElement('li');
       setElemText(li, errmsgs[i]);
@@ -1013,7 +1030,6 @@ function refreshMoves() {
     }
     document.getElementById("moves").appendChild(ul);
   }
-
 }
 
 // History
@@ -1126,6 +1142,10 @@ function getCurSan(move) {
 
 function onMouseDown(e) {
   if (_menu) showHideMenu(false, e);
+  if (_reviewMode && !_processingGuess) {
+    endReview();
+    return;
+  }
   if (document.onmousemove == graphMouseMove) {
     graphMouseDown(e);
     return;
@@ -1908,10 +1928,96 @@ function getParameterByName(name, url) {
 }
 
 
+
+
+
 // Guess Mode Logic
 
+function showGuessHistory() {
+  setElemText(document.getElementById("moves"), "");
+
+  if (_targetGame.length == 0) {
+    var div = document.createElement("div");
+    div.style.padding = "20px";
+    div.style.color = "#888";
+    div.style.textAlign = "center";
+    div.style.fontStyle = "italic";
+    setElemText(div, "Paste a PGN to start guessing!");
+    document.getElementById("moves").appendChild(div);
+    return;
+  }
+
+  var div = document.createElement("div");
+  div.style.padding = "5px";
+  div.style.height = "100%";
+  div.style.overflowY = "auto";
+
+  var table = document.createElement("table");
+  table.style.width = "100%";
+  table.style.borderCollapse = "collapse";
+
+  for (var i = 0; i < _targetGame.length; i += 2) {
+    var row = document.createElement("tr");
+
+    var num = document.createElement("td");
+    setElemText(num, (i / 2 + 1) + ".");
+    num.style.width = "30px";
+    num.style.color = "#888";
+    row.appendChild(num);
+
+    var wMove = document.createElement("td");
+    if (i >= _targetMoveIndex) {
+      setElemText(wMove, "...");
+      wMove.style.color = "#ccc";
+    } else {
+      setElemText(wMove, _targetGame[i].san);
+      if (i == _targetMoveIndex - 1) wMove.style.fontWeight = "bold"; // Last played
+      wMove.style.color = "#333";
+    }
+
+    // Highlight current target
+    if (i == _targetMoveIndex) {
+      wMove.style.backgroundColor = "#444";
+      wMove.style.color = "#fff";
+    }
+
+    row.appendChild(wMove);
+
+    var bMove = document.createElement("td");
+    if (i + 1 < _targetGame.length) {
+      if (i + 1 >= _targetMoveIndex) {
+        setElemText(bMove, "...");
+        bMove.style.color = "#ccc";
+      } else {
+        setElemText(bMove, _targetGame[i + 1].san);
+        if (i + 1 == _targetMoveIndex - 1) bMove.style.fontWeight = "bold";
+        bMove.style.color = "#333";
+      }
+
+      if (i + 1 == _targetMoveIndex) {
+        bMove.style.backgroundColor = "#444";
+        bMove.style.color = "#fff";
+      }
+    }
+    row.appendChild(bMove);
+
+    table.appendChild(row);
+
+    // Scroll to active
+    if (i == _targetMoveIndex || i + 1 == _targetMoveIndex) {
+      // crude scroll
+      setTimeout(function () { row.scrollIntoView({ block: "center" }); }, 0);
+    }
+  }
+  div.appendChild(table);
+  document.getElementById("moves").appendChild(div);
+}
+
 function playNextTargetMove() {
-  if (!_guessMode || _targetMoveIndex >= _targetGame.length) return;
+  if (!_guessMode || _targetMoveIndex >= _targetGame.length) {
+    _processingGuess = false;
+    return;
+  }
   var target = _targetGame[_targetMoveIndex];
 
   var pos = parseFEN(getCurFEN());
@@ -1919,6 +2025,7 @@ function playNextTargetMove() {
 
   if (pos.w == userColor) {
     showStatus("Your Turn!");
+    _processingGuess = false;
     return;
   }
 
@@ -1938,11 +2045,15 @@ function playNextTargetMove() {
     } else {
       showStatus("Your Turn!");
     }
-  }, 500);
+    _processingGuess = false;
+  }, 800);
 }
 
 function checkGuess(userMove, oldfen) {
+  if (_processingGuess) return;
   if (_targetMoveIndex >= _targetGame.length) return;
+
+  _processingGuess = true;
 
   var target = _targetGame[_targetMoveIndex];
   var matched = userMove.from.x == target.from.x && userMove.from.y == target.from.y &&
@@ -1950,8 +2061,13 @@ function checkGuess(userMove, oldfen) {
 
   if (matched) {
     showStatus("Correct! " + target.san);
-    _targetMoveIndex++;
-    playNextTargetMove();
+
+    // Always trigger review as requested
+    setTimeout(function () {
+      historyMove(-1);
+      showReview(oldfen);
+    }, 500);
+
   } else {
     showStatus("Checking move...");
 
@@ -1968,7 +2084,7 @@ function checkGuess(userMove, oldfen) {
       if (userScore != null && targetScore != null) {
         // Scores are from perspective of side to move.
         // Since both moves lead to same side to move, we can compare directly "our advantage".
-        // But wait, userScore is "Evaluation of position AFTER user move".
+        // userScore is "Evaluation of position AFTER user move".
         // If I am White, I moved. Now it's Black to move.
         // Engine score is for Black.
         // So My Score = -userScore.
@@ -1979,26 +2095,20 @@ function checkGuess(userMove, oldfen) {
         var diff = myUserScore - myTargetScore;
 
         if (diff >= -50) {
-          var msg = "Good alternative! (" + (diff > 0 ? "+" : "") + diff + " cp). Playing original line.";
+          var msg = "Good alternative! (" + (diff > 0 ? "+" : "") + diff + " cp).";
           showStatus(msg);
 
+          // Trigger Review Mode
+          // Undo user move first to show alternates from the starting position
           setTimeout(function () {
             historyMove(-1);
-            var pos = parseFEN(getCurFEN());
-            var pos2 = doMove(pos, target.from, target.to, target.p);
-
-            historyAdd(getCurFEN());
-            setCurFEN(generateFEN(pos2));
-            historyAdd(getCurFEN(), null, target, target.san);
-            showBoard();
-            _targetMoveIndex++;
-            playNextTargetMove();
-          }, 2000);
-
+            showReview(oldfen);
+          }, 1000);
         } else {
-          showStatus("Mistake (" + diff + " cp). Try again.");
+          showStatus("Mistake. (" + diff + " cp). Try again.");
           setTimeout(function () {
             historyMove(-1);
+            _processingGuess = false;
           }, 1500);
         }
       }
@@ -2019,6 +2129,203 @@ function checkGuess(userMove, oldfen) {
       });
     });
   }
+}
+
+// Review Mode
+
+var _reviewMode = false;
+
+function showReview(fen) {
+  _reviewMode = true;
+  _processingGuess = true; // Block other inputs
+  showStatus("Reviewing alternates...");
+
+  // Reset board to clean state
+  setCurFEN(fen);
+  showBoard();
+
+  var lastDepth = 0;
+
+  _engine.send("stop");
+  _engine.send("ucinewgame");
+  _engine.send("position fen " + fen);
+  _engine.send("setoption name MultiPV value 3");
+  _engine.send("go depth 15", function (str) {
+
+    if (str.indexOf("bestmove") >= 0) {
+      _processingGuess = false; // Allow click to continue
+
+      // Check if any alternates were shown
+      var hasAlternates = false;
+      var elem = document.getElementById('chessboard1');
+      for (var i = 0; i < elem.children.length; i++) {
+        if (elem.children[i].className.indexOf(" h1") >= 0) {
+          hasAlternates = true;
+          break;
+        }
+      }
+
+
+      // Helper to reset/clear arrow1
+      var clearArrow1 = function () {
+        var arrow1 = document.getElementById("arrowWrapper1");
+        if (arrow1) {
+          var line = arrow1.children[0].children[1];
+          line.setAttribute('x1', 0); line.setAttribute('y1', 0);
+          line.setAttribute('x2', 0); line.setAttribute('y2', 0);
+          line.style.stroke = "#000000";
+          var marker = document.getElementById("markerArrow1");
+          if (marker) marker.children[0].style.fill = "#000000";
+        }
+      };
+
+      if (!hasAlternates) {
+        showStatus("Only Best Move found. Click board to continue.");
+
+        // Draw Green Arrow for Best Move
+        var bestMove = _targetGame[_targetMoveIndex];
+
+        var arrow1 = document.getElementById("arrowWrapper1");
+        if (arrow1 && bestMove) {
+          var line = arrow1.children[0].children[1];
+          line.style.stroke = "#00cc00"; // Green
+          var marker = document.getElementById("markerArrow1");
+          if (marker) marker.children[0].style.fill = "#00cc00";
+
+          showArrow1(bestMove);
+        }
+
+      } else {
+        showStatus("Reviewing alternates... Click board to continue.");
+        // Ensure arrow is cleared if we have alternates
+        clearArrow1();
+      }
+    }
+
+    var match = str.match(/multipv (\d+) .*score (cp|mate) ([-\d]+) .*nodes \d+ .*depth (\d+) .*pv (\w+)/);
+    if (match) {
+      var multipv = Number(match[1]);
+      var type = match[2];
+      var score = Number(match[3]);
+      var depth = Number(match[4]);
+      var moveStr = match[5];
+
+      if (depth < 5) return; // Skip very shallow searches
+
+      // New depth? Clear previous highlights
+      if (depth > lastDepth) {
+        lastDepth = depth;
+        // Clear highlights and arrows
+        var elem = document.getElementById('chessboard1');
+        for (var i = 0; i < elem.children.length; i++) {
+          var div = elem.children[i];
+          if (div.className.indexOf(" h1") >= 0) {
+            div.className = div.className.replace(" h1", "");
+            setElemText(div, "");
+          }
+          // Also clear text if it was set without h1 (our new method)
+          if (div.dataset.reviewText) {
+            setElemText(div, "");
+            delete div.dataset.reviewText;
+          }
+        }
+        // Clear Alternate Arrows (Wrapper 3 and 4)
+        document.getElementById("arrowWrapper3").style.display = "none";
+        document.getElementById("arrowWrapper4").style.display = "none";
+      }
+
+      if (depth < lastDepth) return;
+
+      // Filter blunders (simple check: if score is very bad relative to 0? Or just absolute bad?)
+      // Let's hide moves with score < -100 cp for now
+      if (type == "cp" && score < -100) return;
+
+      var evalText = (type == "mate" ? "M" : "") + (score / 100).toFixed(1);
+      if (type != "mate" && score > 0) evalText = "+" + evalText;
+
+      var to = { x: "abcdefgh".indexOf(moveStr[2]), y: "87654321".indexOf(moveStr[3]) };
+      var from = { x: "abcdefgh".indexOf(moveStr[0]), y: "87654321".indexOf(moveStr[1]) };
+      var x = to.x;
+      var y = to.y;
+
+      if (_flip) { x = 7 - x; y = 7 - y; }
+
+      var elem = document.getElementById('chessboard1');
+      for (var i = 0; i < elem.children.length; i++) {
+        var div = elem.children[i];
+        var dx = parseInt(div.style.left.replace("px", "")) / 40;
+        var dy = parseInt(div.style.top.replace("px", "")) / 40;
+        if (dx == x && dy == y) {
+          // Deduplicate: If square already has text (from better multipv), skip
+          if (getElemText(div) != "") return;
+
+          setElemText(div, evalText);
+          // div.className += " h1"; // Removed highlight class as requested
+          div.dataset.reviewText = "true"; // Mark for clearing
+
+          div.style.fontSize = "12px";
+          div.style.lineHeight = "40px";
+          div.style.color = "blue";
+          div.style.fontWeight = "bold";
+          // Ensure text is visible on top of any background
+          div.style.zIndex = "10";
+
+          // Draw Arrow for Alternate
+          // multipv 1 is best move (user played it, or we handle it otherwise).
+          // But here we are iterating PVs.
+          // If this move is NOT the best move (multipv > 1), draw arrow using 3 or 4.
+          if (multipv > 1) {
+            var move = { from: from, to: to };
+            if (multipv == 2) showArrow3(move);
+            else if (multipv == 3) showArrow4(move);
+          }
+        }
+      }
+    }
+  });
+}
+
+function endReview() {
+  _reviewMode = false;
+  _engine.send("setoption name MultiPV value 1");
+
+  // Clear arrow1 (Best Move indication)
+  var clearArrow = function (id) {
+    var wrapper = document.getElementById(id);
+    if (wrapper) {
+      wrapper.style.display = "none";
+      // We can reset coordinates if needed, but display none is usually enough for simplechessboard logic
+      // actually check showArrowInternal... it sets display block.
+      // so display none is fine.
+
+      // Also reset color if we changed it (arrow1)
+      if (id == "arrowWrapper1") {
+        var line = wrapper.children[0].children[1];
+        line.style.stroke = "#000000";
+        var marker = document.getElementById("markerArrow1");
+        if (marker) marker.children[0].style.fill = "#000000";
+      }
+    }
+  };
+
+  clearArrow("arrowWrapper1");
+  clearArrow("arrowWrapper3");
+  clearArrow("arrowWrapper4");
+
+  // Play the target move
+  var target = _targetGame[_targetMoveIndex];
+
+  // We are at 'oldfen' (pre-move).
+  // Play target move.
+  var pos = parseFEN(getCurFEN());
+  var pos2 = doMove(pos, target.from, target.to, target.p);
+  historyAdd(getCurFEN());
+  setCurFEN(generateFEN(pos2));
+  historyAdd(getCurFEN(), null, target, target.san);
+
+  _targetMoveIndex++;
+  showBoard();
+  playNextTargetMove();
 }
 
 // Initialization
@@ -2048,8 +2355,15 @@ window.onload = function () {
   setupInput();
   showBoard();
   _engine = loadEngine();
-  historyLoad();
+  // historyLoad(); // Disable history load to prevent "weird state" in Guess Mode
   var pgn = getParameterByName("pgn");
   if (pgn) command(pgn);
-  else command(getParameterByName("x"));
+  else {
+    var x = getParameterByName("x");
+    if (x) command(x);
+    else {
+      // Default to empty state as requested
+      // command("...", false); 
+    }
+  }
 }
